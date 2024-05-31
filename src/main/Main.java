@@ -112,11 +112,14 @@ public class Main {
     return matches;
   }
 
-  private static String readPdfContents(final Path filePath) throws IOException {
+  private static String readPdfContents(final Path filePath) {
     try (final PDDocument document = PDDocument.load(filePath.toFile())) {
       final PDFTextStripper stripper = new PDFTextStripper();
       return stripper.getText(document).toLowerCase();
+    } catch (Exception e) {
+      System.out.println(e.getMessage());
     }
+    return "";
   }
 
   private static void copyFiles(final Map<String, Set<String>> matchingFiles, final String targetDir) throws IOException {
