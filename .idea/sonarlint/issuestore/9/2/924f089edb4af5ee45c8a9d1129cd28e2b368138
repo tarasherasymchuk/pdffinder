@@ -1,0 +1,15 @@
+
+V
+java:S1220""Move this file to a named package.J$9595ff80-e758-4d6b-ba05-8b7dd8543c88
+Œ
+java:S2095O"DUse try-with-resources or close this "Stream" in a "finally" clause.(àñê‘ûÿÿÿÿ8·¹Úâü1J$0c827195-c02e-4c0c-b689-daafd0a6bb7b
+l	java:S106"+Replace this use of System.out by a logger.(¸Ô
+8¦øØâü1J$5a70d7ee-edf0-4cf2-8f7f-8761435061c9
+¡
+java:S2142 "^Either re-interrupt this method or rethrow the "InterruptedException" that can be caught here.(”ı¾8©øØâü1J$78c5aa5f-15eb-4f44-9ac8-a70352451f72
+‡
+java:S1874("?Remove this use of "withFirstRecordAsHeader"; it is deprecated.(êÁğİÿÿÿÿÿ8Œ÷âü1J$9c7b92e6-2763-4faa-88e2-52a5521d7c04
+‚
+java:S62137":Rename this variable to not match a restricted identifier.(ê¯Ò÷şÿÿÿÿ8®øØâü1J$05b88ac9-81af-4211-98e8-f2319eea0c71
+w
+java:S2864v"4Iterate over the "entrySet" instead of the "keySet".(÷Â8Õ¹Úâü1J$27a51fdc-8b54-4b24-a087-0ac699cc4ae2
