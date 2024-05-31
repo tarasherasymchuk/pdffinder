@@ -5,16 +5,17 @@ import org.apache.commons.csv.CSVRecord;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
+import java.io.*;
 import java.nio.file.*;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 public class Main {
 
   private static final String SEARCH_COLUMN_HEADER = "Invoice #";
+  private static final Logger LOGGER = Logger.getLogger(Main.class.getName());
 
   public static void main(final String[] args) {
     if (args.length != 5) {
@@ -34,36 +35,25 @@ public class Main {
       copyFiles(matchingFiles, targetDir);
       writeUnmatchedSearchStrings(searchStrings, matchingFiles, outputFile);
     } catch (final Exception e) {
-      e.printStackTrace();
+      LOGGER.log(Level.SEVERE, "An error occurred: ", e);
     }
   }
 
   private static Map<String, Boolean> readSearchStrings(final String csvFile) throws IOException {
     final Map<String, Boolean> searchStrings = new ConcurrentHashMap<>();
-    final FileReader reader = new FileReader(csvFile);
-    final Iterable<CSVRecord> records = CSVFormat.Builder.create().setHeader().build().parse(reader);
-//    CSVFormat.DEFAULT.withFirstRecordAsHeader().parse(reader);
-//    String headerName = null;
-//
-//    // Find the "Invoice" column header
-//    for (final String header : records.iterator().next().toMap().keySet()) {
-//      if (header.contains(SEARCH_COLUMN_HEADER)) {
-//        headerName = header;
-//        break;
-//      }
-//    }
-//
-//    if (headerName == null) {
-//      throw new IllegalArgumentException("No column containing 'Invoice' found");
-//    }
+    try (final FileReader reader = new FileReader(csvFile)) {
+      final Iterable<CSVRecord> records = CSVFormat.Builder.create().setHeader().build().parse(reader);
 
-    for (final CSVRecord csvRecord : records) {
-      final String searchString = csvRecord.get(SEARCH_COLUMN_HEADER).trim().toLowerCase();
-      if (isEnglish(searchString)) {
-        searchStrings.put(searchString, Boolean.TRUE);
+      for (final CSVRecord record : records) {
+        final String searchString = record.get(SEARCH_COLUMN_HEADER).trim().toLowerCase();
+        if (isEnglish(searchString)) {
+          searchStrings.put(searchString, Boolean.TRUE);
+        }
       }
+    } catch (final IOException e) {
+      LOGGER.log(Level.SEVERE, "Error reading CSV file: " + csvFile, e);
+      throw e;
     }
-
     return searchStrings;
   }
 
@@ -76,76 +66,99 @@ public class Main {
     return true;
   }
 
-  private static Map<String, Set<String>> searchFiles(final String rootDir, final Map<String, Boolean> searchStrings, final int numWorkers) throws InterruptedException, ExecutionException, IOException {
+  private static Map<String, Set<String>> searchFiles(final String rootDir, final Map<String, Boolean> searchStrings, final int numWorkers) throws InterruptedException, ExecutionException {
     final Map<String, Set<String>> matchingFiles = new ConcurrentHashMap<>();
     final ExecutorService executorService = Executors.newFixedThreadPool(numWorkers);
     final List<Future<Map<String, Set<String>>>> futures = new ArrayList<>();
 
-    Files.walk(Paths.get(rootDir))
-            .filter(Files::isRegularFile)
-            .filter(path -> path.toString().toLowerCase().endsWith(".pdf"))
-            .forEach(path -> futures.add(executorService.submit(() -> processFile(path, searchStrings))));
+    try {
+      Files.walk(Paths.get(rootDir))
+              .filter(Files::isRegularFile)
+              .filter(path -> path.toString().toLowerCase().endsWith(".pdf"))
+              .forEach(path -> futures.add(executorService.submit(() -> processFile(path, searchStrings))));
+    } catch (final IOException e) {
+      LOGGER.log(Level.SEVERE, "Error walking through directory: " + rootDir, e);
+    }
 
     for (final Future<Map<String, Set<String>>> future : futures) {
-      final Map<String, Set<String>> result = future.get();
-      result.forEach((key, value) -> matchingFiles.merge(key, value, (existing, newValue) -> {
-        existing.addAll(newValue);
-        return existing;
-      }));
+      try {
+        final Map<String, Set<String>> result = future.get();
+        result.forEach((key, value) -> matchingFiles.merge(key, value, (existing, newValue) -> {
+          existing.addAll(newValue);
+          return existing;
+        }));
+      } catch (final ExecutionException e) {
+        LOGGER.log(Level.SEVERE, "Error processing file", e);
+      }
     }
 
     executorService.shutdown();
     return matchingFiles;
   }
 
-  private static Map<String, Set<String>> processFile(final Path filePath, final Map<String, Boolean> searchStrings) throws IOException {
+  private static Map<String, Set<String>> processFile(final Path filePath, final Map<String, Boolean> searchStrings) {
     final Map<String, Set<String>> matches = new HashMap<>();
-    final String filenameLower = filePath.getFileName().toString().toLowerCase();
-    final String fileContent = readPdfContents(filePath);
+    try {
+      final String filenameLower = filePath.getFileName().toString().toLowerCase();
+      final String fileContent = readPdfContents(filePath);
 
-    for (final String searchString : searchStrings.keySet()) {
-      if (filenameLower.contains(searchString) || fileContent.contains(searchString)) {
-        matches.computeIfAbsent(searchString, k -> new HashSet<>()).add(filePath.toString());
+      for (final String searchString : searchStrings.keySet()) {
+        if (filenameLower.contains(searchString) || fileContent.contains(searchString)) {
+          matches.computeIfAbsent(searchString, k -> new HashSet<>()).add(filePath.toString());
+        }
       }
+    } catch (final IOException e) {
+      LOGGER.log(Level.WARNING, "Error reading PDF file: " + filePath, e);
     }
-
     return matches;
   }
 
-  private static String readPdfContents(final Path filePath) {
+  private static String readPdfContents(final Path filePath) throws IOException {
     try (final PDDocument document = PDDocument.load(filePath.toFile())) {
+      if (document.isEncrypted()) {
+        LOGGER.log(Level.WARNING, "PDF file is encrypted: " + filePath);
+        return "";
+      }
       final PDFTextStripper stripper = new PDFTextStripper();
       return stripper.getText(document).toLowerCase();
-    } catch (Exception e) {
-      System.out.println(e.getMessage());
+    } catch (final IOException e) {
+      LOGGER.log(Level.WARNING, "Error loading PDF document: " + filePath, e);
+      throw e;
     }
-    return "";
   }
 
-  private static void copyFiles(final Map<String, Set<String>> matchingFiles, final String targetDir) throws IOException {
-    for (final String searchString : matchingFiles.keySet()) {
-      for (final String filePath : matchingFiles.get(searchString)) {
-        final Path targetSubDir = Paths.get(targetDir);
-        Files.createDirectories(targetSubDir);
-        final Path sourcePath = Paths.get(filePath);
-        final String baseName = sourcePath.getFileName().toString();
-        final String name = baseName.substring(0, baseName.lastIndexOf('.'));
-        final String ext = baseName.substring(baseName.lastIndexOf('.'));
-        final Path targetFilePath = targetSubDir.resolve(searchString.toUpperCase() + "_" + name + ext);
+  private static void copyFiles(final Map<String, Set<String>> matchingFiles, final String targetDir) {
+    matchingFiles.forEach((searchString, files) -> {
+      files.forEach(filePath -> {
+        try {
+          final Path targetSubDir = Paths.get(targetDir);
+          Files.createDirectories(targetSubDir);
 
-        if (!Files.exists(targetFilePath)) {
-          Files.copy(sourcePath, targetFilePath);
+          final Path sourcePath = Paths.get(filePath);
+          final String baseName = sourcePath.getFileName().toString();
+          final String name = baseName.substring(0, baseName.lastIndexOf('.'));
+          final String ext = baseName.substring(baseName.lastIndexOf('.'));
+          final Path targetFilePath = targetSubDir.resolve(searchString + "_" + name + ext);
+
+          if (!Files.exists(targetFilePath)) {
+            Files.copy(sourcePath, targetFilePath);
+          }
+        } catch (final IOException e) {
+          LOGGER.log(Level.WARNING, "Error copying file: " + filePath, e);
         }
-      }
-    }
+      });
+    });
   }
 
-  private static void writeUnmatchedSearchStrings(final Map<String, Boolean> searchStrings, final Map<String, Set<String>> matchingFiles, final String outputFile) throws IOException {
+  private static void writeUnmatchedSearchStrings(final Map<String, Boolean> searchStrings, final Map<String, Set<String>> matchingFiles, final String outputFile) {
     try (final FileWriter writer = new FileWriter(outputFile)) {
       for (final String searchString : searchStrings.keySet()) {
         if (!matchingFiles.containsKey(searchString)) {
           writer.write(searchString + System.lineSeparator());
         }
       }
+    } catch (final IOException e) {
+      LOGGER.log(Level.SEVERE, "Error writing unmatched search strings to file: " + outputFile, e);
     }
-  }}
+  }
+}
