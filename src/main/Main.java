@@ -11,7 +11,6 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.regex.Pattern;
 
 public class Main {
 
@@ -97,35 +96,35 @@ public class Main {
     return matchingFiles;
   }
 
-  private static Map<String, Set<String>> processFile(Path filePath, Map<String, Boolean> searchStrings) throws IOException {
-    Map<String, Set<String>> matches = new HashMap<>();
-    String filenameLower = filePath.getFileName().toString().toLowerCase();
-    List<String> fileContent = readPdfContents(filePath);
+  private static Map<String, Set<String>> processFile(final Path filePath, final Map<String, Boolean> searchStrings) {
+    final Map<String, Set<String>> matches = new HashMap<>();
+    try {
+      final String filenameLower = filePath.getFileName().toString().toLowerCase();
+      final String fileContent = readPdfContents(filePath);
 
-    for (String searchString : searchStrings.keySet()) {
-      String regex = "\\b" + Pattern.quote(searchString) + "\\b"; // Ensure the search string is a whole word
-      Pattern pattern = Pattern.compile(regex);
-
-      for (String line : fileContent) {
-        if (pattern.matcher(line).find()) {
+      for (final String searchString : searchStrings.keySet()) {
+        if (filenameLower.contains(searchString) || fileContent.contains(searchString)) {
           matches.computeIfAbsent(searchString, k -> new HashSet<>()).add(filePath.toString());
-          break;
         }
       }
+    } catch (final IOException e) {
+      LOGGER.log(Level.WARNING, "Error reading PDF file: " + filePath, e);
     }
-
     return matches;
   }
 
-  private static List<String> readPdfContents(Path filePath) throws IOException {
-    List<String> content = new ArrayList<>();
-    try (PDDocument document = PDDocument.load(filePath.toFile())) {
-      PDFTextStripper stripper = new PDFTextStripper();
-      String text = stripper.getText(document);
-      String[] lines = text.split("\\r?\\n");
-      content.addAll(Arrays.asList(lines));
+  private static String readPdfContents(final Path filePath) throws IOException {
+    try (final PDDocument document = PDDocument.load(filePath.toFile())) {
+      if (document.isEncrypted()) {
+        LOGGER.log(Level.WARNING, "PDF file is encrypted: " + filePath);
+        return "";
+      }
+      final PDFTextStripper stripper = new PDFTextStripper();
+      return stripper.getText(document).toLowerCase();
+    } catch (final IOException e) {
+      LOGGER.log(Level.WARNING, "Error loading PDF document: " + filePath, e);
+      throw e;
     }
-    return content;
   }
 
   private static void copyFiles(final Map<String, Set<String>> matchingFiles, final String targetDir) {
